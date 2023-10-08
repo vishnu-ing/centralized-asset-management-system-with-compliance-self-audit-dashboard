@@ -1,0 +1,39 @@
+- name: Execute and manage classification script on Windows
+  hosts: windows:!10.0.0.12
+  gather_facts: yes
+
+  tasks:
+    - name: Transfer classification script to the remote host
+      win_copy:
+        src: /shared/Scripts/data_classification.py
+        dest: C:\\Users\\vagrant\\Desktop\\data_classification.py
+
+    - name: Execute classification script on remote host
+      win_command: python C:\\Users\\vagrant\\Desktop\\data_classification.py
+      register: script_output
+
+    - name: Find classification JSON file on remote host
+      win_find:
+        paths: C:\\Users\\vagrant\\Desktop
+        patterns: "*_classification.json"
+      register: found_files
+
+    - name: Fetch the JSON file to local machine
+      fetch:
+        src: "{{ item.path }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_classification.json"
+        flat: yes
+      with_items: "{{ found_files.files }}"
+      when: found_files.matched > 0
+
+    - name: Clean up remote classification JSON file
+      win_file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ found_files.files }}"
+      when: found_files.matched > 0
+
+    - name: Clean up remote script
+      win_file:
+        path: "C:\\Users\\vagrant\\Desktop\\data_classification.py"
+        state: absent

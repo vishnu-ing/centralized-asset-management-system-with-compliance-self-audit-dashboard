@@ -1,0 +1,62 @@
+---
+- name: Scan Network and Detect OS
+  hosts: localhost
+  become: true
+  gather_facts: false
+  vars:
+    network_range: "10.0.0.0/24"
+    excluded_ips: ['10.0.0.10']  # Define IPs to exclude
+    special_host: '10.0.0.12'
+    special_password: 'V@grant2024!Sec'
+    default_password: 'vagrant'
+
+  tasks:
+    - name: Install nmap if not already installed
+      apt:
+        name: nmap
+        state: present
+        update_cache: yes
+
+    - name: Scan for live hosts
+      shell: "nmap -sn {{ network_range }} -oG -"
+      register: live_hosts
+      changed_when: false
+
+    - name: Extract live IPs
+      set_fact:
+        ip_list: "{{ live_hosts.stdout | regex_findall('(?<=Host: )\\S+') }}"
+
+    - name: Remove excluded IPs from the list
+      set_fact:
+        filtered_ip_list: "{{ ip_list | difference(excluded_ips) }}"
+
+    - name: Detect OS for live hosts
+      shell: "nmap -A --max-os-tries 5 {{ item }} -oG -"
+      register: os_scan_results
+      with_items: "{{ filtered_ip_list }}"
+      ignore_errors: true
+      changed_when: false
+
+    - name: Create inventory file
+      copy:
+        content: |
+          [linux]
+          {% for result in os_scan_results.results %}
+          {% if 'Linux' in result.stdout %}
+          {{ result.item }} ansible_user=vagrant ansible_ssh_private_key_file=~/.ssh/id_rsa
+          {% endif %}
+          {% endfor %}
+
+          [linux:vars]
+          ansible_become=true
+          ansible_become_method=sudo
+          ansible_python_interpreter=/usr/bin/python3
+
+          [windows]
+          {% for result in os_scan_results.results %}
+          {% if 'Windows' in result.stdout %}
+          {{ result.item }} ansible_connection=winrm ansible_winrm_transport=basic ansible_user=vagrant ansible_password={{ special_password if result.item == special_host else default_password }} ansible_winrm_port=5985 ansible_winrm_scheme=http ansible_winrm_server_cert_validation=ignore ansible_host={{ result.item }}
+          {% endif %}
+          {% endfor %}
+        dest: "/shared/inventory"
+      when: os_scan_results.results | length > 0

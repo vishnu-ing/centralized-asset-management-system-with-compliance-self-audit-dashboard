@@ -1,0 +1,65 @@
+---
+- name: Install and run Lynis audit and parse outputs
+  hosts: linux  # Specify your target group or all hosts
+  become: yes  # Ensures sudo permissions for tasks
+
+  tasks:
+    - name: Install git
+      apt:
+        name: git
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Clone Lynis repository
+      git:
+        repo: 'https://github.com/CISOfy/lynis.git'
+        dest: /opt/lynis
+      become: yes
+
+    - name: Run Lynis audit
+      command: ./lynis audit system
+      args:
+        chdir: /opt/lynis
+      register: lynis_output
+      ignore_errors: true
+
+    - name: Extract Warnings from Lynis report
+      shell: >
+        grep 'warning\[\]=' /var/log/lynis-report.dat | sed -e 's/warning\[\]=//g'
+      register: lynis_warnings_raw
+
+    - name: Extract Suggestions from Lynis report
+      shell: >
+        grep 'suggestion\[\]=' /var/log/lynis-report.dat | sed -e 's/suggestion\[\]=//g' | sed '/installed_packages_array=/Q'
+      register: lynis_suggestions_raw
+
+    - name: Parse Warnings into structured data
+      set_fact:
+        lynis_warnings: "{{ lynis_warnings_raw.stdout_lines | map('regex_replace', '(\\w+-\\d+)\\|(.+)', '{\"id\": \"\\1\", \"message\": \"\\2\"}') | list }}"
+
+    - name: Parse Suggestions into structured data
+      set_fact:
+        lynis_suggestions: "{{ lynis_suggestions_raw.stdout_lines | map('regex_replace', '(\\w+-\\d+)\\|(.+)', '{\"id\": \"\\1\", \"message\": \"\\2\"}') | list }}"
+
+    - name: Format output as JSON
+      set_fact:
+        lynis_audit_results_json: >
+          {
+            "warnings": {{ lynis_warnings | to_json }},
+            "suggestions": {{ lynis_suggestions | to_json }},
+            "hostIP": "{{ inventory_hostname }}",
+            "lastAssessmentDate": "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+          }
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      file:
+        path: "/shared/Output"
+        state: directory
+        mode: '0755'
+
+    - name: Write results to a file
+      delegate_to: localhost
+      copy:
+        content: "{{ lynis_audit_results_json }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_lynis_results.json"

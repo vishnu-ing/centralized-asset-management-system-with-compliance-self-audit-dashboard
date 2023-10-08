@@ -1,0 +1,48 @@
+---
+- name: Perform Nmap Security Scan and Extract CVEs with Ratings
+  hosts: all
+  gather_facts: yes  # Enabling fact gathering to use ansible_hostname
+
+  tasks:
+    - name: Run Nmap Scan for Vulnerabilities and Services
+      shell: >
+        {% if 'windows' in group_names %}
+        nmap -sC -sV --script=vuln {{ ansible_host }}
+        {% else %}
+        nmap -sV -sC -T4 -A -p- --script="vuln" {{ ansible_host }}
+        {% endif %}
+      delegate_to: localhost
+      register: nmap_scan_output
+      changed_when: nmap_scan_output.rc == 0
+      ignore_errors: true
+
+    - name: Extract CVEs and Ratings
+      set_fact:
+        cve_data: "{{ nmap_scan_output.stdout_lines | select('search', 'CVE-') | map('regex_replace', '.*?(CVE-\\d{4}-\\d+).*\\s+(\\d+\\.\\d+|\\d+).*', '{\"cve\": \"\\1\", \"rating\": \"\\2\"}') | list }}"
+
+    - name: Process port scan results
+      set_fact:
+        port_scan: "{{ nmap_scan_output.stdout_lines | select('search', '/tcp') | select('search', 'open') | map('regex_replace', '(\\d+/tcp)\\s+open\\s+(\\S+)\\s+(.*)', '{\"port\": \"\\1\", \"service\": \"\\2\", \"version\": \"\\3\"}') | list }}"
+
+    - name: Construct JSON output for scan results
+      set_fact:
+        json_output: {
+          "lastAssessmentDate": "{{ ansible_date_time.date + ' ' + ansible_date_time.time }}",
+          "hostIP": "{{ inventory_hostname }}",
+          "PortScanResults": "{{ port_scan }}",
+          "VulnerabilityScanResults": "{{ cve_data }}"
+        }
+
+    - name: Ensure output directory exists
+      delegate_to: localhost
+      file:
+        path: "/shared/Output"
+        state: directory
+        mode: '0755'
+
+    - name: Write Scan Results to a JSON File
+      delegate_to: localhost
+      copy:
+        dest: "/shared/Output/{{ inventory_hostname }}_nmap_results.json"
+        content: "{{ json_output | to_nice_json }}"
+      when: nmap_scan_output.stdout is defined

@@ -1,0 +1,34 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "aspyatkin/ubuntu-20.04-server"
+
+  # Configure public network with a static IP
+  config.vm.network :private_network, ip: "10.0.0.11", virtualbox__intnet: true
+  config.vm.synced_folder "\\share", "/shared"
+
+
+  config.vm.provider "virtualbox" do |v|
+    v.name = "Ubuntu20Server"
+    v.gui = false
+    v.customize ["modifyvm", :id, "--memory", "2048", "--cpus", "2"]
+  end
+
+  # Provisioning with a shell script
+  config.vm.provision "shell", inline: <<-SHELL
+    export DEBIAN_FRONTEND=noninteractive
+    
+    # Update packages
+    sudo apt-get update
+
+    # Install and configure vulnerable services
+
+    # Setup SSH for passwordless login
+    mkdir -p /home/vagrant/.ssh
+    chmod 700 /home/vagrant/.ssh
+    chmod 600 /home/vagrant/.ssh/authorized_keys
+    chown -R vagrant:vagrant /home/vagrant/.ssh
+    
+  SHELL
+end

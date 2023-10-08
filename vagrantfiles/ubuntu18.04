@@ -1,0 +1,33 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-18.04"
+  config.vm.network :private_network, ip: "10.0.0.14", virtualbox__intnet: "intnet"
+  config.vm.synced_folder "\\share", "/shared"
+
+  config.vm.provider "virtualbox" do |v|
+    v.name = "ubuntu-18.04"
+    v.gui = true
+    v.customize ["modifyvm", :id, "--memory", "2000", "--cpus", "2"]
+  end
+
+  config.vm.provision "shell", inline: <<-SHELL
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Update packages and install necessary services
+    sudo apt-get update
+    sudo apt-get install -y ssh openssh-server iptables
+    
+    # Ensure SSH is installed and configure SSH to allow password authentication
+    sudo sed -i '/^#PasswordAuthentication yes/c\\PasswordAuthentication yes' /etc/ssh/sshd_config
+    sudo sed -i '/^PasswordAuthentication no/c\\#PasswordAuthentication no' /etc/ssh/sshd_config
+    sudo systemctl restart ssh
+
+    # Add SSH public key for passwordless access
+    mkdir -p /home/vagrant/.ssh
+    chmod 700 /home/vagrant/.ssh
+    chmod 600 /home/vagrant/.ssh/authorized_keys
+    chown -R vagrant:vagrant /home/vagrant/.ssh
+  SHELL
+end

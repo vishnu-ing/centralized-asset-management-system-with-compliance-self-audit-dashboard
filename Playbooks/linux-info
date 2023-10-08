@@ -1,0 +1,47 @@
+---
+- name: Gather Linux System Information
+  hosts: linux
+  gather_facts: yes
+
+  tasks:
+    - name: Check if system is running Ubuntu 18.04.6 LTS
+      shell: hostnamectl | grep -q "Ubuntu 18.04.6 LTS"
+      register: is_ubuntu_desktop
+      ignore_errors: true
+      changed_when: false
+
+    - name: Collect System Information
+      shell: |
+        . /etc/os-release
+        echo "{\"Hostname\": \"$(hostname)\", \
+              \"OperatingSystem\": \"$PRETTY_NAME\", \
+              \"OSVersion\": \"$VERSION_ID\", \
+              \"KernelVersion\": \"$(uname -r)\", \
+              \"HardwarePlatform\": \"$(uname -m)\", \
+              \"MACAddress\": \"$(ip link show | grep link/ether | awk '{print $2}' | head -n 1)\", \
+              \"IPAddress\": \"{{ inventory_hostname }}\", \
+              \"AssignedUser\": \"$(whoami)\", \
+              \"isServer\": \"{{ 'true' if is_ubuntu_desktop.rc != 0 else 'false' }}\", \
+              \"LastAssessmentDate\": \"{{ ansible_date_time.date }} {{ ansible_date_time.time }}\"}"
+      register: system_info
+
+    - name: Display System Information
+      debug:
+        msg: "{{ system_info.stdout | from_json }}"
+
+    - name: Save System Information to JSON File
+      delegate_to: localhost
+      copy:
+        content: "{{ system_info.stdout }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_system_info.json"
+
+    - name: Confirm file creation
+      delegate_to: localhost
+      stat:
+        path: "/shared/Output/{{ inventory_hostname }}_system_info.json"
+      register: file_check
+
+    - name: Debug file creation status
+      delegate_to: localhost
+      debug:
+        msg: "File was created successfully: {{ file_check.stat.exists }}"

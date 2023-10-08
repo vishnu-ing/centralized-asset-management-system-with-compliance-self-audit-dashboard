@@ -1,0 +1,52 @@
+---
+- name: Retrieve Installed Software Information on Windows
+  hosts: windows
+  gather_facts: yes  # Enable fact gathering to get date and IP details
+
+  tasks:
+    - name: Ensure output directory exists on the Ansible host
+      delegate_to: localhost
+      run_once: true
+      file:
+        path: "/shared/Output"
+        state: directory
+        mode: '0755'
+
+    - name: Execute PowerShell script to get software info
+      win_shell: |
+        function Get-SoftwareInfo {
+            $softwareList = @()
+            $keyPaths = @(
+                "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+                "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+            )
+            foreach ($keyPath in $keyPaths) {
+                $programs = Get-ChildItem $keyPath | ForEach-Object {
+                    $program = $_.GetValue("DisplayName")
+                    if ($program) {
+                        [PSCustomObject]@{
+                            softwareName = $program
+                            version = ($_.GetValue("DisplayVersion") -replace '^\s*$','' -replace '^$','N/A')
+                            vendor = ($_.GetValue("Publisher") -replace '^\s*$','' -replace '^$','N/A')
+                            installationDate = ($_.GetValue("InstallDate") -replace '^\s*$','' -replace '^$','N/A')
+                            hostIP = "{{ inventory_hostname }}"
+                            lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+                        }
+                    }
+                }
+                $softwareList += $programs
+            }
+            $softwareList | ConvertTo-Json -Depth 5 -Compress
+        }
+        Get-SoftwareInfo | Out-File -FilePath "C:\Windows\Temp\software_inventory.json" -Encoding UTF8
+      register: software_info_path
+
+    - name: Fetch the software information file from the target to control machine
+      fetch:
+        src: "C:\\Windows\\Temp\\software_inventory.json"
+        dest: "/shared/Output/{{ inventory_hostname }}_software_inventory.json"
+        flat: yes
+
+    - name: Display software information fetch status
+      debug:
+        msg: "Software information has been fetched and saved to /shared/Output/{{ inventory_hostname }}_software_inventory.json"

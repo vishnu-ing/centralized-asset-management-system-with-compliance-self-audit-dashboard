@@ -1,0 +1,35 @@
+---
+- name: Gather Windows System Information
+  hosts: windows
+  gather_facts: yes  # Enable fact gathering to get the date and time
+
+  tasks:
+    - name: Collect Network and System Information
+      win_shell: |
+        $nic = Get-NetAdapter | Where-Object {$_.Status -eq 'Up' -and $_.PhysicalMediaType -ne 'Wireless'} | Select-Object -First 1
+        $mac = $nic.MacAddress
+        $os = Get-WmiObject -Class Win32_OperatingSystem
+        $cs = Get-WmiObject -Class Win32_ComputerSystem
+        $user = $cs.UserName
+        $architecture = $cs.SystemType
+        @{
+          Hostname = $cs.Name
+          AssignedUser = $user
+          OperatingSystem = $os.Caption
+          OSVersion = $os.Version
+          KernelVersion = $os.BuildNumber
+          HardwarePlatform = $architecture
+          MACAddress = $mac
+          IPAddress = "{{ inventory_hostname }}"  # Setting IP address as inventory_hostname
+          LastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: combined_info
+
+    - name: Save System Information to JSON File
+      delegate_to: localhost
+      copy:
+        content: "{{ combined_info.stdout }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_info.json"
+
+    - debug:
+        msg: "System information JSON saved successfully."
