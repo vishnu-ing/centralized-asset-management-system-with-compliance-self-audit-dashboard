@@ -1,0 +1,213 @@
+---
+- name: Windows Configuration Compliance Checks
+  hosts: windows
+  gather_facts: yes  # Enable fact gathering to get date and IP details
+
+  tasks:
+    - name: Export security policy
+      win_command: secedit /export /cfg secpol.cfg
+      register: secpol_export
+
+    - name: Check Minimum Password Length
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "MinimumPasswordLength"
+        $expected = 14
+        if ($config) {
+          $length = $config.Line.Split('=')[1].Trim()
+          $compliant = if ($length -ge $expected) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "Minimum Password Length"; 
+          complianceStatus = $compliant; 
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: password_length_check
+
+    - name: Check Account Lockout Duration
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "LockoutDuration"
+        $expected = 15
+        if ($config) {
+          $duration = $config.Line.Split('=')[1].Trim()
+          $compliant = if ($duration -ge $expected) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "Account Lockout Duration"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: lockout_duration_check
+
+    - name: Check UAC Admin Approval Mode for Built-in Administrator
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "FilterAdministratorToken"
+        if ($config) {
+          $enabled = $config.Line.Split('=')[1].Trim()
+          $compliant = if ($enabled -in ("1", "4,1")) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "UAC Admin Approval for Built-in Admin"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: uac_admin_approval
+
+    - name: Check Administrator Account Status
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "EnableAdminAccount"
+        if ($config) {
+          $enabled = $config.Line.Split('=')[1].Trim() -eq "1"
+          $compliant = if ($enabled) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "Administrator Account Status"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: admin_account_status
+
+    - name: Check Windows Firewall Private Profile State
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Private
+        $compliant = if ($profile.Enabled) {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Private Profile State"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_private_state
+
+    - name: Check Windows Firewall Private Inbound connections
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Private
+        $compliant = if ($profile.DefaultInboundAction -eq "Block") {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Private Inbound"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_private_inbound
+
+    - name: Check Windows Firewall Private Outbound connections
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Private
+        $compliant = if ($profile.DefaultOutboundAction -eq "Allow") {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Private Outbound"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_private_outbound
+
+    - name: Check Windows Firewall Public Profile State
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Public
+        $compliant = if ($profile.Enabled) {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Public Profile State"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_public_state
+
+    - name: Check Windows Firewall Public Inbound connections
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Public
+        $compliant = if ($profile.DefaultInboundAction -eq "Block") {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Public Inbound"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_public_inbound
+
+    - name: Check Windows Firewall Public Outbound connections
+      win_shell: |
+        $profile = Get-NetFirewallProfile -Name Public
+        $compliant = if ($profile.DefaultOutboundAction -eq "Allow") {"Compliant"} else {"Non-Compliant"}
+        return @{
+          benchmarkId = "Firewall Public Outbound"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: fw_public_outbound
+
+    - name: Check Password Complexity Requirements
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "PasswordComplexity"
+        if ($config) {
+          $complexityEnabled = $config.Line.Split('=')[1].Trim() -eq "1"
+          $compliant = if ($complexityEnabled) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "Password Complexity Requirements"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: password_complexity_check
+
+    - name: Check Password History Size
+      win_shell: |
+        $config = Select-String -Path secpol.cfg -Pattern "PasswordHistorySize"
+        if ($config) {
+          $historySize = $config.Line.Split('=')[1].Trim()
+          $compliant = if ($historySize -ge 24) {"Compliant"} else {"Non-Compliant"}
+        } else {
+          $compliant = "Non-Compliant"
+        }
+        return @{
+          benchmarkId = "Password History Size"; 
+          complianceStatus = $compliant;
+          hostIP = "{{ inventory_hostname }}";
+          lastAssessmentDate = "{{ ansible_date_time.date }} {{ ansible_date_time.time }}"
+        } | ConvertTo-Json
+      register: password_history_check
+      
+
+    - name: Aggregate Compliance Results
+      set_fact:
+        compliance_results: "{{ [
+          password_length_check.stdout | from_json,
+          lockout_duration_check.stdout | from_json,
+          uac_admin_approval.stdout | from_json,
+          admin_account_status.stdout | from_json,
+          fw_private_state.stdout | from_json,
+          fw_private_inbound.stdout | from_json,
+          fw_private_outbound.stdout | from_json,
+          fw_public_state.stdout | from_json,
+          fw_public_inbound.stdout | from_json,
+          fw_public_outbound.stdout | from_json,
+          password_complexity_check.stdout | from_json,
+          password_history_check.stdout | from_json
+        ] }}"
+
+    - name: Save Compliance Results to JSON File
+      delegate_to: localhost
+      copy:
+        content: "{{ compliance_results | to_nice_json }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_compliance.json"
+
+    - name: Display compliance information fetch status
+      debug:
+        msg: "Compliance information has been fetched and saved to /shared/Output/{{ inventory_hostname }}_compliance.json"

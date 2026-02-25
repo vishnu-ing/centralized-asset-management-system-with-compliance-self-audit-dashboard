@@ -1,0 +1,162 @@
+---
+- name: Full System Security Compliance Check
+  hosts: linux
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Check SSH MaxAuthTries
+      shell: 'grep -E "^MaxAuthTries\\s+[1-4]" /etc/ssh/sshd_config && echo "Compliant" || echo "Non-Compliant"'
+      register: max_auth_tries
+      ignore_errors: true
+
+    - name: Check SSH PermitEmptyPasswords
+      shell: 'grep -E "^PermitEmptyPasswords\\s+no" /etc/ssh/sshd_config && echo "Compliant" || echo "Non-Compliant"'
+      register: permit_empty_passwords
+      ignore_errors: true
+
+    - name: Check if /tmp is configured
+      stat:
+        path: /tmp
+      register: tmp_stat
+
+    - name: Check for sudo installation
+      shell: 'which sudo >/dev/null 2>&1 && echo "Compliant" || echo "Non-Compliant"'
+      register: sudo_installed
+      ignore_errors: true
+
+    - name: Check for sudo log file
+      stat:
+        path: /var/log/sudo.log
+      register: sudo_log
+
+    - name: Check iptables-persistent installation
+      shell: 'dpkg -l iptables-persistent >/dev/null 2>&1 && echo "Compliant" || echo "Non-Compliant"'
+      register: iptables_persistent
+      ignore_errors: true
+
+    - name: Check firewall rules for all open ports
+      shell: 'iptables -L | grep -q "ACCEPT" && echo "Compliant" || echo "Non-Compliant"'
+      register: firewall_rules
+      ignore_errors: true
+
+    - name: Check default deny firewall policy
+      shell: 'iptables -L INPUT -v -n | grep -q "Chain INPUT (policy DROP)" && echo "Compliant" || echo "Non-Compliant"'
+      register: default_deny_policy
+      ignore_errors: true
+
+    - name: Check rsyslog installation
+      shell: 'dpkg -l rsyslog >/dev/null 2>&1 && echo "Compliant" || echo "Non-Compliant"'
+      register: rsyslog_installed
+      ignore_errors: true
+
+    - name: Check if rsyslog service is enabled
+      shell: 'systemctl is-enabled rsyslog | grep -q "enabled" && echo "Compliant" || echo "Non-Compliant"'
+      register: rsyslog_enabled
+      ignore_errors: true
+
+    - name: Check if logging is configured
+      shell: 'grep -E "^\*.info" /etc/rsyslog.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: logging_configured
+      ignore_errors: true
+
+    - name: Check rsyslog remote logging configuration
+      shell: 'grep -E "^\*\.\* @.*" /etc/rsyslog.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: rsyslog_remote_logging
+      ignore_errors: true
+
+    - name: Check remote rsyslog message acceptance
+      shell: 'grep -E "^\$ModLoad imtcp" /etc/rsyslog.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: remote_rsyslog_acceptance
+      ignore_errors: true
+
+    - name: Check journald to rsyslog forwarding
+      shell: 'grep -E "^ForwardToSyslog=yes" /etc/systemd/journald.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: journald_forwarding
+      ignore_errors: true
+
+    - name: Check journald compression
+      shell: 'grep -E "^Compress=yes" /etc/systemd/journald.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: journald_compression
+      ignore_errors: true
+
+    - name: Check journald log persistence
+      shell: 'grep -E "^Storage=persistent" /etc/systemd/journald.conf && echo "Compliant" || echo "Non-Compliant"'
+      register: journald_persistence
+      ignore_errors: true
+
+    - name: Check permissions on /etc/ssh/sshd_config
+      shell: |
+        perm=$(stat -c "%a" /etc/ssh/sshd_config)
+        if [ "$perm" -eq 644 ]; then
+          echo "Compliant"
+        else
+          echo "Non-Compliant"
+        fi
+      register: sshd_config_permissions
+      ignore_errors: true
+
+    - name: Check password creation requirements
+      shell: |
+        perm=$(grep "PASS_MAX_DAYS" /etc/login.defs | awk '{print $2}')
+        if [ -n "$perm" ] && [ "$perm" -le 365 ]; then
+          echo "Compliant"
+        else
+          echo "Non-Compliant"
+        fi
+      register: password_creation_requirements
+      failed_when: password_creation_requirements.stdout == ""
+      ignore_errors: true
+
+    - name: Check lockout settings for failed password attempts
+      shell: 'grep -E "pam_tally2" /etc/pam.d/common-auth && echo "Compliant" || echo "Non-Compliant"'
+      register: lockout_settings
+      ignore_errors: true
+
+    - name: Check permissions on /etc/passwd
+      shell: 'stat -c "%a" /etc/passwd | grep -q "644" && echo "Compliant" || echo "Non-Compliant"'
+      register: passwd_permissions
+      ignore_errors: true
+
+    - name: Check permissions on /etc/shadow
+      shell: 'stat -c "%a" /etc/shadow | grep -q "640" && echo "Compliant" || echo "Non-Compliant"'
+      register: shadow_permissions
+      ignore_errors: true
+
+    - name: Remove existing compliance results file if it exists
+      delegate_to: localhost
+      file:
+        path: "/shared/Output/{{ inventory_hostname }}_compliance.json"
+        state: absent
+
+    - name: Compile compliance results into JSON
+      set_fact:
+        compliance_results: "{{ [
+            {'benchmarkId': 'SSH MaxAuthTries', 'complianceStatus': max_auth_tries.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'SSH PermitEmptyPasswords', 'complianceStatus': permit_empty_passwords.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': '/tmp Configuration', 'complianceStatus': (tmp_stat.stat.isdir | bool) | ternary('Compliant', 'Non-Compliant'), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Sudo Installation', 'complianceStatus': sudo_installed.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Sudo Log File', 'complianceStatus': (sudo_log.stat.exists | bool) | ternary('Compliant', 'Non-Compliant'), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'iptables-persistent', 'complianceStatus': iptables_persistent.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Firewall Rules', 'complianceStatus': firewall_rules.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Default Deny Policy', 'complianceStatus': default_deny_policy.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Rsyslog Installed', 'complianceStatus': rsyslog_installed.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Rsyslog Service', 'complianceStatus': rsyslog_enabled.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Logging Configured', 'complianceStatus': logging_configured.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Rsyslog Remote Logging', 'complianceStatus': rsyslog_remote_logging.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Remote Message Acceptance', 'complianceStatus': remote_rsyslog_acceptance.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Journald Forwarding', 'complianceStatus': journald_forwarding.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Journald Compression', 'complianceStatus': journald_compression.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Journald Persistence', 'complianceStatus': journald_persistence.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'SSHD Config Permissions', 'complianceStatus': sshd_config_permissions.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Password Requirements', 'complianceStatus': password_creation_requirements.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Lockout Settings', 'complianceStatus': lockout_settings.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Passwd Permissions', 'complianceStatus': passwd_permissions.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time},
+            {'benchmarkId': 'Shadow Permissions', 'complianceStatus': shadow_permissions.stdout.split('\n')[-1].strip(), 'hostIP': inventory_hostname, 'lastAssessmentDate': ansible_date_time.date ~ ' ' ~ ansible_date_time.time}
+          ] | to_nice_json }}"
+
+    - name: Save Compliance Results to File
+      delegate_to: localhost
+      copy:
+        content: "{{ compliance_results }}"
+        dest: "/shared/Output/{{ inventory_hostname }}_compliance.json"
